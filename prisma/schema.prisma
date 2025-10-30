@@ -1,0 +1,536 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Personal Information
+  email         String   @unique
+  name          String
+  phone         String?
+  avatar        String?
+  bio           String?  @db.Text
+
+  // Authentication
+  emailVerified DateTime?
+  password      String   // Hashed
+
+  // Role
+  role          UserRole @default(DONOR)
+
+  // Gamification
+  totalPoints   Int      @default(0)
+  level         Int      @default(1)
+  badges        UserBadge[]
+
+  // Relationships
+  campaigns     Campaign[]
+  donations     Donation[]
+  fundraiserStats FundraiserStats?
+  teamMemberships TeamMember[]
+  createdTeams  Team[]   @relation("TeamCreator")
+
+  // Settings
+  preferredCurrency String @default("MYR")
+  language      String   @default("en")
+  notifications Json?    // Notification preferences
+
+  @@index([email])
+  @@index([totalPoints])
+}
+
+model Campaign {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Basic Information
+  title         String
+  slug          String   @unique
+  description   String   @db.Text
+  story         String?  @db.Text // Rich text story
+
+  // Campaign Details
+  goalAmount    Decimal  @db.Decimal(12, 2)
+  raisedAmount  Decimal  @default(0) @db.Decimal(12, 2)
+  currency      String   @default("MYR")
+
+  // Images & Media
+  coverImage    String?
+  videoUrl      String?
+  images        String[] // Additional images
+
+  // Dates
+  startDate     DateTime @default(now())
+  endDate       DateTime?
+
+  // Status
+  status        CampaignStatus @default(DRAFT)
+  visibility    CampaignVisibility @default(PUBLIC)
+
+  // Categorization
+  category      CampaignCategory
+  tags          String[] // ["education", "refugee", "urgent"]
+
+  // Creator
+  creator       User     @relation(fields: [creatorId], references: [id])
+  creatorId     String
+
+  // Beneficiary Link (optional - link to beneficiary system)
+  beneficiaryId String?
+
+  // Team (if part of team challenge)
+  team          Team?    @relation(fields: [teamId], references: [id])
+  teamId        String?
+
+  // Social Sharing
+  shareCount    Int      @default(0)
+  viewCount     Int      @default(0)
+
+  // Donations
+  donations     Donation[]
+  donationCount Int      @default(0)
+
+  // Impact Tracking
+  impactMetrics Json?    // Custom metrics per campaign type
+  updates       CampaignUpdate[]
+
+  // Settings
+  allowRecurring Boolean  @default(true)
+  allowAnonymous Boolean  @default(true)
+  minDonation   Decimal? @db.Decimal(10, 2)
+  maxDonation   Decimal? @db.Decimal(10, 2)
+
+  @@index([status])
+  @@index([category])
+  @@index([creatorId])
+  @@index([teamId])
+  @@index([endDate])
+  @@index([slug])
+}
+
+model Donation {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Donation Details
+  amount        Decimal  @db.Decimal(12, 2)
+  currency      String   @default("MYR")
+
+  // Donor Information
+  donor         User?    @relation(fields: [donorId], references: [id])
+  donorId       String?
+  donorName     String?  // For anonymous/guest donations
+  donorEmail    String?
+  isAnonymous   Boolean  @default(false)
+
+  // Campaign
+  campaign      Campaign @relation(fields: [campaignId], references: [id])
+  campaignId    String
+
+  // Payment
+  paymentStatus PaymentStatus @default(PENDING)
+  paymentMethod String   // "stripe", "fpx", "card"
+  paymentIntentId String? @unique // Stripe payment intent ID
+  transactionId String?  @unique // Local payment gateway transaction ID
+  receiptUrl    String?
+
+  // Message & Visibility
+  message       String?  @db.Text
+  isPublic      Boolean  @default(true)
+
+  // Recurring
+  isRecurring   Boolean  @default(false)
+  recurringFrequency String? // "monthly", "weekly"
+
+  // Impact (optional - for specific cause tracking)
+  impactData    Json?
+
+  // Refund
+  refundedAt    DateTime?
+  refundReason  String?
+
+  @@index([campaignId])
+  @@index([donorId])
+  @@index([paymentStatus])
+  @@index([createdAt])
+  @@index([paymentIntentId])
+}
+
+model Team {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Team Information
+  name          String
+  slug          String   @unique
+  description   String?  @db.Text
+  avatar        String?
+
+  // Team Goal
+  goalAmount    Decimal  @db.Decimal(12, 2)
+  raisedAmount  Decimal  @default(0) @db.Decimal(12, 2)
+  currency      String   @default("MYR")
+
+  // Team Leader
+  creator       User     @relation("TeamCreator", fields: [creatorId], references: [id])
+  creatorId     String
+
+  // Members
+  members       TeamMember[]
+  memberCount   Int      @default(0)
+  maxMembers    Int?     // Optional limit
+
+  // Campaigns
+  campaigns     Campaign[]
+  campaignCount Int      @default(0)
+
+  // Status
+  status        TeamStatus @default(ACTIVE)
+
+  // Challenge (if part of competition)
+  challengeId   String?
+  challenge     Challenge? @relation(fields: [challengeId], references: [id])
+
+  @@index([slug])
+  @@index([creatorId])
+  @@index([status])
+  @@index([challengeId])
+}
+
+model TeamMember {
+  id            String   @id @default(cuid())
+  joinedAt      DateTime @default(now())
+
+  team          Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId        String
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+
+  role          TeamMemberRole @default(MEMBER)
+
+  // Individual stats within team
+  raisedAmount  Decimal  @default(0) @db.Decimal(12, 2)
+  campaignCount Int      @default(0)
+
+  @@unique([teamId, userId])
+  @@index([teamId])
+  @@index([userId])
+}
+
+model Challenge {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Challenge Information
+  name          String
+  description   String   @db.Text
+
+  // Challenge Period
+  startDate     DateTime
+  endDate       DateTime
+
+  // Prize/Reward
+  prize         String?  @db.Text
+
+  // Challenge Type
+  type          ChallengeType // "most_raised", "most_donors", "most_campaigns"
+
+  // Status
+  status        ChallengeStatus @default(UPCOMING)
+
+  // Teams
+  teams         Team[]
+
+  // Rules
+  rules         Json?
+
+  @@index([startDate])
+  @@index([endDate])
+  @@index([status])
+}
+
+model CampaignUpdate {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  campaign      Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignId    String
+
+  title         String
+  content       String   @db.Text
+  images        String[] // Update images
+
+  // Engagement
+  likeCount     Int      @default(0)
+
+  @@index([campaignId])
+  @@index([createdAt])
+}
+
+model Badge {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+
+  // Badge Information
+  name          String   @unique
+  description   String
+  icon          String   // URL or icon identifier
+
+  // Requirements
+  category      BadgeCategory
+  requirement   Json     // Flexible requirements
+
+  // Rarity
+  rarity        BadgeRarity @default(COMMON)
+
+  // Points
+  pointsReward  Int      @default(0)
+
+  // Users who earned this badge
+  users         UserBadge[]
+
+  @@index([category])
+  @@index([rarity])
+}
+
+model UserBadge {
+  id            String   @id @default(cuid())
+  earnedAt      DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String
+
+  badge         Badge    @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+  badgeId       String
+
+  @@unique([userId, badgeId])
+  @@index([userId])
+  @@index([earnedAt])
+}
+
+model Milestone {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+
+  // Milestone Information
+  name          String
+  description   String
+  type          MilestoneType
+
+  // Threshold
+  threshold     Int      // e.g., 100 for "100 donations", 10000 for "RM 10,000 raised"
+
+  // Reward
+  pointsReward  Int      @default(0)
+  badgeReward   String?  // Badge name to award
+
+  @@index([type])
+}
+
+model FundraiserStats {
+  id            String   @id @default(cuid())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId        String   @unique
+
+  // Campaign Stats
+  totalCampaigns Int     @default(0)
+  activeCampaigns Int    @default(0)
+
+  // Fundraising Stats
+  totalRaised   Decimal  @default(0) @db.Decimal(12, 2)
+  totalDonations Int     @default(0)
+  averageDonation Decimal @default(0) @db.Decimal(10, 2)
+
+  // Social Stats
+  totalShares   Int      @default(0)
+  totalViews    Int      @default(0)
+
+  // Engagement
+  rank          Int?     // Overall leaderboard rank
+  lastActive    DateTime @default(now())
+
+  @@index([totalRaised])
+  @@index([rank])
+}
+
+model Leaderboard {
+  id            String   @id @default(cuid())
+  updatedAt     DateTime @updatedAt
+
+  // Leaderboard Type
+  type          LeaderboardType // "top_fundraisers", "top_donors", "top_teams"
+  period        LeaderboardPeriod // "all_time", "monthly", "weekly"
+
+  // Data (cached JSON)
+  data          Json     // Array of { userId/teamId, name, amount, rank }
+
+  // Period dates (for time-based leaderboards)
+  startDate     DateTime?
+  endDate       DateTime?
+
+  @@unique([type, period, startDate])
+  @@index([type])
+  @@index([updatedAt])
+}
+
+model ShareTracking {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+
+  // Campaign being shared
+  campaignId    String
+
+  // User who shared (if logged in)
+  userId        String?
+
+  // Platform
+  platform      SocialPlatform
+
+  // Click tracking
+  clickCount    Int      @default(0)
+
+  // Referral code (for tracking conversions)
+  referralCode  String   @unique
+
+  @@index([campaignId])
+  @@index([userId])
+  @@index([referralCode])
+}
+
+// Enums
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  FUNDRAISER
+  DONOR
+  TEAM_LEADER
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  PAUSED
+  CANCELLED
+}
+
+enum CampaignVisibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+enum CampaignCategory {
+  EDUCATION
+  HEALTHCARE
+  FOOD_RELIEF
+  SHELTER
+  DISASTER_RELIEF
+  ORPHAN_CARE
+  ELDERLY_CARE
+  ZAKAT
+  SADAQAH
+  QURBANI
+  WAKAF
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum TeamStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum TeamMemberRole {
+  LEADER
+  CO_LEADER
+  MEMBER
+}
+
+enum ChallengeType {
+  MOST_RAISED
+  MOST_DONORS
+  MOST_CAMPAIGNS
+  FASTEST_GOAL
+}
+
+enum ChallengeStatus {
+  UPCOMING
+  ACTIVE
+  COMPLETED
+}
+
+enum BadgeCategory {
+  FUNDRAISING
+  DONATION
+  SOCIAL_SHARING
+  MILESTONE
+  SPECIAL_EVENT
+}
+
+enum BadgeRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+enum MilestoneType {
+  TOTAL_RAISED
+  DONATION_COUNT
+  CAMPAIGN_COUNT
+  SHARE_COUNT
+  DAYS_ACTIVE
+}
+
+enum LeaderboardType {
+  TOP_FUNDRAISERS
+  TOP_DONORS
+  TOP_TEAMS
+  TOP_CAMPAIGNS
+}
+
+enum LeaderboardPeriod {
+  ALL_TIME
+  MONTHLY
+  WEEKLY
+  DAILY
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  TWITTER
+  WHATSAPP
+  INSTAGRAM
+  TELEGRAM
+  EMAIL
+}
